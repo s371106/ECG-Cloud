@@ -1,0 +1,132 @@
+---
+- name: Setup SSH keys on workers and distribute files
+  hosts: worker
+  become: yes
+  gather_facts: false
+  vars:
+    files_dir: "/home/ubuntu/data"
+    chunks_dir: "/home/ubuntu/chunks"
+    chunk_size: 300
+
+  tasks:
+    - name: Ensure .ssh directory exists
+      ansible.builtin.file:
+        path: /home/ubuntu/.ssh
+        state: directory
+        owner: ubuntu
+        group: ubuntu
+        mode: '0700'
+
+    - name: Generate SSH key pair
+      ansible.builtin.openssh_keypair:
+        path: /home/ubuntu/.ssh/id_rsa
+        owner: ubuntu
+        group: ubuntu
+        type: rsa
+        size: 4096
+      register: ssh_key
+
+    - name: Add public key to authorized_keys
+      ansible.builtin.lineinfile:
+        path: /home/ubuntu/.ssh/authorized_keys
+        line: "{{ ssh_key.public_key }}"
+        create: yes
+        owner: ubuntu
+        group: ubuntu
+        mode: '0600'
+
+    - name: Set permissions on private key
+      ansible.builtin.file:
+        path: /home/ubuntu/.ssh/id_rsa
+        owner: ubuntu
+        group: ubuntu
+        mode: '0600'
+
+    - name: Set permissions on public key
+      ansible.builtin.file:
+        path: /home/ubuntu/.ssh/id_rsa.pub
+        owner: ubuntu
+        group: ubuntu
+        mode: '0644'
+
+    - name: Create directories on workers
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: '0775'
+        owner: ubuntu
+        group: ubuntu
+      loop:
+        - /home/ubuntu/application
+        - /home/ubuntu/application/data
+        - /home/ubuntu/application/output
+        - /home/ubuntu/application/logs
+
+    - name: Install necessary packages
+      ansible.builtin.apt:
+        name:
+          - python3
+          - python3-pip
+          - libgl1-mesa-glx
+        state: present
+        update_cache: yes
+
+    - name: Install Python packages
+      ansible.builtin.pip:
+        name:
+          - opencv-python
+          - scipy
+          - pandas
+          - matplotlib
+          - pytesseract
+          - mysql-connector-python
+        state: present
+
+    - name: Copy ECG-Digitization.py to workers
+      ansible.builtin.copy:
+        src: /home/ubuntu/ecg-scan-cloud/application/ECG-Digitization.py
+        dest: /home/ubuntu/application/ECG-Digitization.py
+        mode: '0755'
+        owner: ubuntu
+        group: ubuntu
+
+    - name: Synchronize files to workers
+      ansible.builtin.synchronize:
+        src: "{{ files_dir }}/"
+        dest: /home/ubuntu/application/data/
+        recursive: yes
+        rsync_opts:
+          - "--include '*/'"
+          - "--include '*.txt'"
+          - "--exclude '*'"
+      delegate_to: localhost
+
+    - name: List contents of /home/ubuntu/application/data/ on workers
+      ansible.builtin.command:
+        cmd: ls -l /home/ubuntu/application/data/
+
+    - name: Execute the Python script on workers and log output
+      ansible.builtin.shell: |
+        python3 /home/ubuntu/application/ECG-Digitization.py
+      register: script_output
+      ignore_errors: yes
+
+    - name: Log script output and error to a file
+      ansible.builtin.copy:
+        content: |
+          STDOUT:
+          {{ script_output.stdout }}
+
+          STDERR:
+          {{ script_output.stderr }}
+        dest: "/home/ubuntu/application/logs/{{ inventory_hostname }}_script_output.log"
+
+    - name: Check return code and provide detailed error message
+      ansible.builtin.debug:
+        msg: "Script failed with return code {{ script_output.rc }}. Check stderr for details."
+      when: script_output.rc != 0
+
+    - name: Fail if script failed
+      ansible.builtin.fail:
+        msg: "ECG Digitization script failed with return code {{ script_output.rc }}. Please review the error logs above."
+      when: script_output.rc != 0

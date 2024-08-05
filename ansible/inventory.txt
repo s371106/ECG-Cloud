@@ -1,0 +1,23 @@
+[common]
+    storage-target-0 ansible_host=10.196.38.215 ansible_connection=ssh ansible_user=ubuntu
+        database-target-0 ansible_host=10.196.38.232 ansible_connection=ssh ansible_user=ubuntu
+        worker-target-0 ansible_host=10.196.36.255 ansible_connection=ssh ansible_user=ubuntu
+    worker-target-1 ansible_host=10.196.38.240 ansible_connection=ssh ansible_user=ubuntu
+    worker-target-2 ansible_host=10.196.38.178 ansible_connection=ssh ansible_user=ubuntu
+    worker-target-3 ansible_host=10.196.38.81 ansible_connection=ssh ansible_user=ubuntu
+    worker-target-4 ansible_host=10.196.37.178 ansible_connection=ssh ansible_user=ubuntu
+    worker-target-5 ansible_host=10.196.37.76 ansible_connection=ssh ansible_user=ubuntu
+
+[storage]
+    storage-target-0 ansible_host=10.196.38.215 ansible_connection=ssh ansible_user=ubuntu
+
+[database]
+    database-target-0 ansible_host=10.196.38.232 ansible_connection=ssh ansible_user=ubuntu
+
+[worker]
+    worker-target-0 ansible_host=10.196.36.255 ansible_connection=ssh ansible_user=ubuntu
+    worker-target-1 ansible_host=10.196.38.240 ansible_connection=ssh ansible_user=ubuntu
+    worker-target-2 ansible_host=10.196.38.178 ansible_connection=ssh ansible_user=ubuntu
+    worker-target-3 ansible_host=10.196.38.81 ansible_connection=ssh ansible_user=ubuntu
+    worker-target-4 ansible_host=10.196.37.178 ansible_connection=ssh ansible_user=ubuntu
+    worker-target-5 ansible_host=10.196.37.76 ansible_connection=ssh ansible_user=ubuntu
