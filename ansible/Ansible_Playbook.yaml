@@ -1,5 +1,29 @@
 ---
-- name: Setup SSH keys on workers and distribute files
+- name: Setup database(s)
+  hosts: database
+  become: yes
+  tasks:
+    - name: Download MySQL server
+      apt:
+        name: mysql-server
+        state: present
+    
+    - name: Start MySQL server
+      service:
+        name: mysql
+        state: started
+        enabled: yes
+
+    - name: unbind localhost
+      ansible.builtin.command: sudo sed -i 's/^bind-address/#bind-address/' /etc/mysql/mysql.conf.d/mysqld.cnf
+
+    - name: restart mysql server
+      ansible.builtin.command: sudo /etc/init.d/mysql restart
+
+    - name: create mysql user
+      ansible.builtin.command: sudo mysql -e "CREATE USER 'test_admin'@'localhost' IDENTIFIED BY 'test';GRANT ALL PRIVILEGES ON *.* TO 'test_admin'@'localhost' WITH GRANT OPTION;CREATE USER 'test_admin'@'%' IDENTIFIED BY 'test';GRANT ALL PRIVILEGES ON *.* TO 'test_admin'@'%' WITH GRANT OPTION;"
+
+- name: Distribute files from Storage to workers and run script
   hosts: worker
   become: yes
   gather_facts: false
@@ -7,50 +31,9 @@
     files_dir: "/home/ubuntu/data"
     chunks_dir: "/home/ubuntu/chunks"
     chunk_size: 300
-
   tasks:
-    - name: Ensure .ssh directory exists
-      ansible.builtin.file:
-        path: /home/ubuntu/.ssh
-        state: directory
-        owner: ubuntu
-        group: ubuntu
-        mode: '0700'
-
-    - name: Generate SSH key pair
-      ansible.builtin.openssh_keypair:
-        path: /home/ubuntu/.ssh/id_rsa
-        owner: ubuntu
-        group: ubuntu
-        type: rsa
-        size: 4096
-      register: ssh_key
-
-    - name: Add public key to authorized_keys
-      ansible.builtin.lineinfile:
-        path: /home/ubuntu/.ssh/authorized_keys
-        line: "{{ ssh_key.public_key }}"
-        create: yes
-        owner: ubuntu
-        group: ubuntu
-        mode: '0600'
-
-    - name: Set permissions on private key
-      ansible.builtin.file:
-        path: /home/ubuntu/.ssh/id_rsa
-        owner: ubuntu
-        group: ubuntu
-        mode: '0600'
-
-    - name: Set permissions on public key
-      ansible.builtin.file:
-        path: /home/ubuntu/.ssh/id_rsa.pub
-        owner: ubuntu
-        group: ubuntu
-        mode: '0644'
-
     - name: Create directories on workers
-      ansible.builtin.file:
+      file:
         path: "{{ item }}"
         state: directory
         mode: '0775'
@@ -61,18 +44,15 @@
         - /home/ubuntu/application/data
         - /home/ubuntu/application/output
         - /home/ubuntu/application/logs
-
     - name: Install necessary packages
-      ansible.builtin.apt:
+      apt:
         name:
           - python3
           - python3-pip
           - libgl1-mesa-glx
         state: present
-        update_cache: yes
-
     - name: Install Python packages
-      ansible.builtin.pip:
+      pip:
         name:
           - opencv-python
           - scipy
@@ -83,36 +63,75 @@
         state: present
 
     - name: Copy ECG-Digitization.py to workers
-      ansible.builtin.copy:
+      copy:
         src: /home/ubuntu/ecg-scan-cloud/application/ECG-Digitization.py
         dest: /home/ubuntu/application/ECG-Digitization.py
         mode: '0755'
         owner: ubuntu
         group: ubuntu
 
-    - name: Synchronize files to workers
-      ansible.builtin.synchronize:
-        src: "{{ files_dir }}/"
-        dest: /home/ubuntu/application/data/
-        recursive: yes
-        rsync_opts:
-          - "--include '*/'"
-          - "--include '*.txt'"
-          - "--exclude '*'"
-      delegate_to: localhost
+    - name: Set the database IP address
+      ansible.builtin.command: sudo sed -i 's/<database_server_ip_address>/{{ hostvars[groups['database'][0]]['ansible_host'] }}/' /home/ubuntu/application/ECG-Digitization.py
+
+    - name: distribute files
+      ansible.builtin.copy:
+        src: /home/ubuntu/ecg-scan-cloud/data/{{ item.1 }}
+        dest: /home/ubuntu/application/data/{{ item.1 }}
+        mode: '0755'
+        owner: ubuntu
+        group: ubuntu
+      loop: "{{ delegation|subelements('files') }}"
+      loop_control:
+        label: "{{ item }}"
+      when: item.0.hostname == inventory_hostname
+
+    # - name: Synchronize files to workers
+    #   synchronize:
+    #     src: "{{ files_dir }}/"
+    #     dest: /home/ubuntu/application/data/
+    #     recursive: yes
+    #     rsync_opts:
+    #       - "--include '*/'"
+    #       - "--include '*.txt'"
+    #       - "--exclude '*'"
+    #   delegate_to: localhost
 
     - name: List contents of /home/ubuntu/application/data/ on workers
-      ansible.builtin.command:
-        cmd: ls -l /home/ubuntu/application/data/
+      command: ls -l /home/ubuntu/application/data/
 
-    - name: Execute the Python script on workers and log output
-      ansible.builtin.shell: |
-        python3 /home/ubuntu/application/ECG-Digitization.py
-      register: script_output
+    - name: Execute the Python script on workers
+      command: python3 /home/ubuntu/application/ECG-Digitization.py
+      async: 60 * 5
+      poll: 0
+      register: script_result
       ignore_errors: yes
 
+
+    # - name: Debug script output
+    #   debug:
+    #     msg: "Script Output: {{ script_result.stdout }}"
+    #   when: script_result is defined
+
+    # - name: Debug script error
+    #   debug:
+    #     msg: "Script Error: {{ script_result.stderr }}"
+    #   when: script_result is defined
+
+    # - name: Check return code and provide detailed error message
+    #   debug:
+    #     msg: "Script failed with return code {{ script_result.rc }}. Check stderr for details."
+    #   when: script_result.rc != 0
+
+    # - name: Fail if script failed
+    #   fail:
+    #     msg: "ECG Digitization script failed with return code {{ script_result.rc }}. Please review the error logs above."
+    #   when: script_result.rc != 0
+
+    - name: Run and log script output on workers
+      shell: python3 /home/ubuntu/application/ECG-Digitization.py
+      register: script_output
     - name: Log script output and error to a file
-      ansible.builtin.copy:
+      copy:
         content: |
           STDOUT:
           {{ script_output.stdout }}
@@ -120,13 +139,3 @@
           STDERR:
           {{ script_output.stderr }}
         dest: "/home/ubuntu/application/logs/{{ inventory_hostname }}_script_output.log"
-
-    - name: Check return code and provide detailed error message
-      ansible.builtin.debug:
-        msg: "Script failed with return code {{ script_output.rc }}. Check stderr for details."
-      when: script_output.rc != 0
-
-    - name: Fail if script failed
-      ansible.builtin.fail:
-        msg: "ECG Digitization script failed with return code {{ script_output.rc }}. Please review the error logs above."
-      when: script_output.rc != 0

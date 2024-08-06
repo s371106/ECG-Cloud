@@ -37,7 +37,7 @@ import mysql.connector
 #df = pd.read_csv('output.csv')
 #df
 
-connection = mysql.connector.connect(user="test_admin", password="test", host="10.196.38.232")
+connection = mysql.connector.connect(user="test_admin", password="test", host="<database_server_ip_address>")
 
 def create_try_1(folder_path):
     image_path = os.path.join(folder_path, 'mask.png')
@@ -769,24 +769,28 @@ for data_file_name in data_file_names:
     database_name = "Digitized_ECG"
     cursor.execute(f"CREATE DATABASE IF NOT EXISTS {database_name};")
     cursor.execute(f"USE {database_name};")
-    cursor.execute(f"DROP TABLE IF EXISTS {data_file_name};")
+    cursor.execute(f"DROP TABLE IF EXISTS {data_file_name.replace('.tif', '')};")
 
-    query = f"CREATE TABLE {data_file_name} (" + f"row_id INTEGER AUTO_INCREMENT NOT NULL PRIMARY KEY,"
+    column_string = ""
+    query = f"CREATE TABLE {data_file_name.replace('.tif', '')} (" + f"row_id INTEGER AUTO_INCREMENT NOT NULL PRIMARY KEY,"
     for index, column in enumerate(dataset.columns):
         if column == "Unnamed: 0":
             continue
         
         if index + 1 == len(dataset.columns):
-            query += f" {column} DOUBLE(10,2));"
+            query += f" {column.replace('.', '_')} DOUBLE(10,2));"
+            column_string += f"{column.replace('.', '_')}" 
         else:
-            query += f" {column} DOUBLE(10,2),"
+            query += f" {column.replace('.', '_')} DOUBLE(10,2),"
+            column_string += f"{column.replace('.', '_')}," 
+    print(query)
     cursor.execute(query)
 
 
     for index, sample in dataset.iterrows():
         # print("-----")
         # print(sample)
-        query = "INSERT INTO test VALUES ("
+        query = f"INSERT INTO {data_file_name.replace('.tif', '')} ({column_string}) VALUES ("
         
         for index, key in enumerate(dataset.columns):
             if key == "Unnamed: 0":
@@ -806,7 +810,7 @@ for data_file_name in data_file_names:
                 
         cursor.execute(query)
 
-        cursor.close()
+    cursor.close()
 
 
 
