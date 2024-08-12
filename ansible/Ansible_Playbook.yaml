@@ -23,6 +23,58 @@
     - name: create mysql user
       ansible.builtin.command: sudo mysql -e "CREATE USER 'test_admin'@'localhost' IDENTIFIED BY 'test';GRANT ALL PRIVILEGES ON *.* TO 'test_admin'@'localhost' WITH GRANT OPTION;CREATE USER 'test_admin'@'%' IDENTIFIED BY 'test';GRANT ALL PRIVILEGES ON *.* TO 'test_admin'@'%' WITH GRANT OPTION;"
 
+
+- name: Install and Configure Node Exporter
+  hosts: all
+  become: yes
+  tasks:
+    - name: Download Node Exporter
+      get_url:
+        url: https://github.com/prometheus/node_exporter/releases/download/v1.5.0/node_exporter-1.5.0.linux-amd64.tar.gz
+        dest: /tmp/node_exporter.tar.gz
+
+    - name: Extract Node Exporter
+      unarchive:
+        src: /tmp/node_exporter.tar.gz
+        dest: /usr/local/bin/
+        remote_src: yes
+
+    - name: Create Node Exporter user
+      user:
+        name: node_exporter
+        system: yes
+
+    - name: Move Node Exporter binary to proper location
+      command: mv /usr/local/bin/node_exporter-1.5.0.linux-amd64/node_exporter /usr/local/bin/
+
+    - name: Remove downloaded archive
+      file:
+        path: /tmp/node_exporter.tar.gz
+        state: absent
+
+    - name: Create Node Exporter service file
+      copy:
+        dest: /etc/systemd/system/node_exporter.service
+        content: |
+          [Unit]
+          Description=Prometheus Node Exporter
+          After=network.target
+
+          [Service]
+          User=node_exporter
+          ExecStart=/usr/local/bin/node_exporter
+
+          [Install]
+          WantedBy=multi-user.target
+
+    - name: Enable and start Node Exporter service
+      systemd:
+        name: node_exporter
+        state: started
+        enabled: yes
+
+
+
 - name: Distribute files from Storage to workers and run script
   hosts: worker
   become: yes
